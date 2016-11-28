@@ -1,0 +1,97 @@
+#!/bin/python
+# Copyright (c) 2016, Patrick Uiterwijk <patrick@puiterwijk.org>
+# All rights reserved.
+#
+# DebugKrb is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# DebugKrb is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DebugKrb.  If not, see <http://www.gnu.org/licenses/>.
+
+import os
+import platform
+import subprocess
+import sys
+import unittest
+
+class TestKerberos(unittest.TestCase):
+    def _call(self, cmd, stdin=None, **kwargs):
+        p = subprocess.Popen(cmd,
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE,
+                             stdin=subprocess.PIPE,
+                             **kwargs)
+        stdout, stderr = p.communicate(stdin)
+        return p.returncode, stdout, stderr
+
+    def test_01_installed(self):
+        _, _, stderr = self._call(['kinit', '--help'])
+        self.assertIn('unrecognized option', stderr,
+                      'kinit not installed: yum install krb5-workstation')
+
+    def test_02_using_collection(self):
+        _, _, stderr = self._call(['klist'])
+        if 'persistent:' not in stderr and 'DIR:' not in stderr:
+            self.fail('Not a collection cache in use: add "default_ccache_name'
+                      '= KEYRING:persistent:%{uid}" to /etc/krb5.conf under '
+                      '[libdefaults]')
+
+    def test_03_configuration(self):
+        distro_version = platform.dist()[1]
+        with open('/etc/krb5.conf', 'r') as f:
+            krb5_conf = f.read()
+
+        if 'https://id.fedoraproject.org/KdcProxy' in krb5_conf:
+            # They probably have a correct configuration 
+            return
+
+        if distro_version < 6:
+            self.fail('%s %s not supported' % platform.dist()[:2])
+        elif distro_version == 6:
+            # TODO
+            self.fail('TODO')
+        else:
+            # distro >6, check conf.d
+            self.assertIn('includedir /etc/krb5.conf.d', krb5_conf, 'Config: '
+                          'includedir not in configuration. Add "includedir '
+                          '/etc/krb5.conf.d/" as top line in /etc/krb5.conf')
+
+            for f in os.listdir('/etc/krb5.conf.d'):
+                name = os.path.join('/etc/krb5.conf.d', f)
+                if os.path.isfile(name):
+                    with open(name, 'r') as fp:
+                        if 'https://id.fedoraproject.org/KdcProxy' in fp.read():
+                            if '.' in f:
+                                self.fail('Fedora config file name %s contains'
+                                          ' period. Please move to file '
+                                          'without period' % name)
+                            return
+
+            self.fail('Unable to find krb5 configuration file for Fedora')
+
+    def test_04_kinit(self):
+        _, stdout, stderr = self._call(['kinit', 'test_us@FEDORAPROJECT.ORG'],
+                                       env={'KRB5_TRACE': '/dev/stdout'},
+                                       stdin='nopassword')
+
+        self.assertNotIn('HTTP/1.1 503', stdout, 'Error occured on the server '
+                         'side. Please inform Infrastructure team')
+
+        self.assertNotIn('Cannot find KDC for realm', stderr, 'Configuration '
+                         'issue. Please ask Infrastructure team')
+
+        self.assertNotIn('HTTPS error', stdout, 'TLS Error caused by OpenSSL, '
+                         'please downgrade OpenSSL to 1.0.0b or earlier')
+
+        self.assertIn('not found in Kerberos database', stderr, 'Strange error'
+                      ' occured. Please tell puiterwijk you got: %s' % stderr)
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2, argv=[sys.argv[0]])
