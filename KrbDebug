@@ -16,11 +16,16 @@
 # along with DebugKrb.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import platform
 import subprocess
 import sys
 import unittest
-import distro
+
+try: 
+    import distro
+    oldpython = False
+except ImportError:
+    import platform
+    oldpython = True
 
 class TestKerberos(unittest.TestCase):
     def _call(self, cmd, stdin=None, **kwargs):
@@ -47,7 +52,11 @@ class TestKerberos(unittest.TestCase):
                       '[libdefaults]')
     
     def test_03_configuration(self):
-        distro_version = distro.version()
+   
+        if oldpython:
+            distro_version = platform.dist()[1]
+        else:
+            distro_version = int(distro.version())
         
         with open('/etc/krb5.conf', 'r') as f:
             krb5_conf = f.read()
@@ -56,9 +65,14 @@ class TestKerberos(unittest.TestCase):
             # They probably have a correct configuration 
             return
 
-        if int(distro_version) < 6:
-            self.fail('%s %s not supported' % distro.version()[:2])
-        elif int(distro_version) == 6:
+        
+        if distro_version < 6:
+            if oldpython:
+                self.fail('%s %s not supported' % platform.dist()[:2])
+            else:
+                self.fail('%s %s not supported' % distro.version()[:2])
+
+        elif distro_version == 6:
             # TODO
             self.fail('TODO')
         else:
