@@ -16,10 +16,16 @@
 # along with DebugKrb.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import platform
 import subprocess
 import sys
 import unittest
+
+try: 
+    import distro
+    oldpython = False
+except ImportError:
+    import platform
+    oldpython = True
 
 class TestKerberos(unittest.TestCase):
     def _call(self, cmd, stdin=None, **kwargs):
@@ -33,19 +39,25 @@ class TestKerberos(unittest.TestCase):
 
     def test_01_installed(self):
         _, _, stderr = self._call(['kinit', '--help'])
-        self.assertIn('option', stderr,
-                      'kinit not installed: yum install krb5-workstation')
-
+        
+        self.assertIn(b'option', stderr,
+                      'kinit not installed: dnf install krb5-workstation')
+    
     def test_02_using_collection(self):
         _, stdout, stderr = self._call(['klist'])
-        if 'keyring' not in stderr and 'DIR:' not in stderr and \
-                'KEYRING' not in stdout and 'DIR:' not in stdout:
+        if b'keyring' not in stderr and b'DIR:' not in stderr and \
+                b'KEYRING' not in stdout and b'DIR:' not in stdout:
             self.fail('Not a collection cache in use: add "default_ccache_name'
                       ' = KEYRING:persistent:%{uid}" to /etc/krb5.conf under '
                       '[libdefaults]')
-
+    
     def test_03_configuration(self):
-        distro_version = platform.dist()[1]
+   
+        if oldpython:
+            distro_version = platform.dist()[1]
+        else:
+            distro_version = int(distro.version())
+        
         with open('/etc/krb5.conf', 'r') as f:
             krb5_conf = f.read()
 
@@ -53,8 +65,13 @@ class TestKerberos(unittest.TestCase):
             # They probably have a correct configuration 
             return
 
+        
         if distro_version < 6:
-            self.fail('%s %s not supported' % platform.dist()[:2])
+            if oldpython:
+                self.fail('%s %s not supported' % platform.dist()[:2])
+            else:
+                self.fail('%s %s not supported' % distro.version()[:2])
+
         elif distro_version == 6:
             # TODO
             self.fail('TODO')
@@ -76,23 +93,23 @@ class TestKerberos(unittest.TestCase):
                             return
 
             self.fail('Unable to find krb5 configuration file for Fedora')
-
+            
     def test_04_kinit(self):
         _, stdout, stderr = self._call(['kinit', 'test_us@FEDORAPROJECT.ORG'],
                                        env={'KRB5_TRACE': '/dev/stdout'},
-                                       stdin='nopassword')
+                                       stdin=b'nopassword')
 
-        self.assertNotIn('HTTP/1.1 503', stdout, 'Error occured on the server '
+        self.assertNotIn(b'HTTP/1.1 503', stdout, 'Error occured on the server '
                          'side. Please inform Infrastructure team')
 
-        self.assertNotIn('Cannot find KDC for realm', stderr, 'Configuration '
+        self.assertNotIn(b'Cannot find KDC for realm', stderr, 'Configuration '
                          'issue. Please ask Infrastructure team')
 
-        self.assertNotIn('HTTPS error', stdout, 'TLS Error caused by OpenSSL, '
+        self.assertNotIn(b'HTTPS error', stdout, 'TLS Error caused by OpenSSL, '
                          'please downgrade OpenSSL to 1.0.0b or earlier')
 
-        self.assertIn('not found in Kerberos database', stderr, 'Strange error'
+        self.assertIn(b'not found in Kerberos database', stderr, 'Strange error'
                       ' occured. Please tell puiterwijk you got: %s' % stderr)
-
+        
 if __name__ == '__main__':
     unittest.main(verbosity=2, argv=[sys.argv[0]])
